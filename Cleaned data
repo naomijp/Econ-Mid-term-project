@@ -1,0 +1,66 @@
+library(tidyverse)
+library(rio)
+library(lubridate)
+library(stringr) 
+
+
+
+list.files("Lab3_Rawdata", pattern = "trends_up")
+help(list.files)
+help(import_list)
+
+# SLIDE 5
+file_list <- list.files("Lab3_Rawdata", pattern = "trends_up", full.names = TRUE)
+combined_data <- rio::import_list(file_list, rbind = TRUE)
+
+##SLIDE 6
+                                                                     
+combined_data <- rio::import_list(file_list, rbind = TRUE)             # Use rio::import_list() to read all files and combine them
+combined_data$date_string <- str_sub(combined_data$monthorweek, 1, 10) # Extract first 10 characters (YYYY-MM-DD format)
+combined_data$date <- ymd(combined_data$date_string)                   # Convert to proper Date format
+combined_data$month <- floor_date(combined_data$date, unit = "month")  # Optional: Aggregate to monthly data by rounding down to first of month
+
+#SLIDE 7
+
+combined_data <- combined_data %>%    # 7.1 Standardize the index variable by school and keyword
+  group_by(schname, keyword) %>%
+  mutate(std_index = (index - mean(index, na.rm = TRUE)) / sd(index, na.rm = TRUE)) %>%
+  ungroup()
+
+aggregated_data <- combined_data %>%  # 7.2 Aggregate to desired level (example: school-month-keyword)
+  group_by(schname, month, keyword) %>%
+  summarize(
+    mean_std_index = mean(std_index, na.rm = TRUE),
+    count = n()
+  ) %>%
+  ungroup()
+
+#SLIDE 8 & 9
+
+scorecard_data <- import("Most+Recent+Cohorts+(Scorecard+Elements).csv")
+scorecard_data_filtered <- scorecard_data %>%
+  filter(PREDDEG == 3) 
+
+
+id_name_link <- import("id_name_link.csv")            # 1. Read Scorecard data and id_name_link
+
+id_name_link_clean <- id_name_link %>%                # 2. Process id_name_link to remove duplicate school names
+  group_by(schname) %>% 
+  mutate(n = n()) %>% 
+  filter(n == 1) %>% 
+  select(-n) %>% 
+  ungroup()
+
+merged_data <- aggregated_data %>%                   # 3. Merge all datasets together
+  inner_join(id_name_link_clean, by = "schname")
+
+final_data <- merged_data %>%                        # 4. Then merge with Scorecard data
+  inner_join(scorecard_data_filtered, by = c("unitid" = "UNITID", "opeid" = "OPEID"))
+
+
+colnames(final_data)
+
+export(final_data, 'my_final_data.xlsx')
+
+
+
