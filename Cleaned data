@@ -60,7 +60,7 @@ final_data <- merged_data %>%                        # 4. Then merge with Scorec
 
 colnames(final_data)
 
-export(final_data, 'my_final_data.xlsx')
+export(final_data, 'my_final_data.csv')
 
 
 
