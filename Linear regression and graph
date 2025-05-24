@@ -1,0 +1,95 @@
+## linear regression 
+library(fixest)
+library(dplyr)
+library(modelsummary)
+library(ggeffects)
+library(ggplot2)
+library(dplyr)
+
+final_data<-read.csv("my_final_data.csv")
+
+## Privacy suppresed to NA
+Earn_final_data <- final_data %>%
+  mutate(
+    earnings_num = as.numeric(
+      ifelse(`md_earn_wne_p10.REPORTED.EARNINGS` == "PrivacySuppressed",
+             NA,
+             `md_earn_wne_p10.REPORTED.EARNINGS`)
+    )
+  )
+
+## Earnings quantiles
+earnings_threshold <- quantile(Earn_final_data$earnings_num, 0.75, na.rm = TRUE)
+
+## New columns or Independant variables
+Earn_final_data <- Earn_final_data %>%
+  mutate(
+    Post_Scorecard = as.integer(month >= as.Date("2015-09-01")),
+    High_Earning_Graduates = as.integer(earnings_num >= earnings_threshold),
+    Post_X_High = Post_Scorecard * High_Earning_Graduates  # optional but useful for clarity
+  )
+
+# STEP 4: Estimate the interaction model with fixed effects and clustered SEs
+new_model <- feols(
+  mean_std_index ~ Post_Scorecard * High_Earning_Graduates |
+    unitid + month,
+  data = Earn_final_data,
+  vcov = ~unitid  # cluster SEs at college level
+)
+
+# clean regression table
+etable(new_model, dict = c(
+  Post_Scorecard = "Post Scorecard",
+  High_Earning_Graduates = "High Earning Grad.",
+  `Post_Scorecard:High_Earning_Graduates` = "Interaction (Post x High Earnings)"
+))
+
+
+interaction_model <- lm(
+  mean_std_index ~ Post_Scorecard * High_Earning_Graduates,
+  data = Earn_final_data
+)
+
+summary(interaction_model)
+
+
+
+## graph
+library(ggplot2)
+library(dplyr)
+
+plot_data <- Earn_final_data %>%
+  mutate(Period = factor(
+    ifelse(Post_Scorecard == 1, "Post", "Pre"),
+    levels = c("Pre", "Post")
+  )) %>%
+  filter(!is.na(Period), !is.na(High_Earning_Graduates)) %>% 
+  group_by(Period, High_Earning_Graduates) %>%
+  summarize(
+    mean_index = mean(mean_std_index, na.rm = TRUE),
+    se_index = sd(mean_std_index, na.rm = TRUE)/sqrt(n()),
+    .groups = 'drop'
+  )
+# Label for clarity
+plot_data$College_Type <- factor(
+  plot_data$High_Earning_Graduates,
+  labels = c("Low Earning Graduates", "High Earning Graduates")
+)
+
+# Create slope graph
+ggplot(plot_data, aes(x = Period, y = mean_index, group = College_Type, color = College_Type)) +
+  geom_line(size = 1.2) +
+  geom_point(size = 3) +
+  geom_errorbar(aes(ymin = mean_index - se_index, ymax = mean_index + se_index), width = 0.1) +
+  labs(
+    title = "Impact of College Scorecard on Search Interest by Graduate Earnings",
+    subtitle = "Post-Scorecard effect: High-earning colleges saw 0.24 SD smaller change in search interest vs. low-earning colleges (SE = 0.03)",
+    x = "Period (relative to Scorecard Release)",
+    y = "Predicted Mean Standardized Search Index (Z-score)",
+    color = "College Type",
+    caption = "Group means with 95% CIs. Based on group averages, not regression-adjusted predictions."
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  scale_color_manual(values = c("hotpink", "steelblue"))
+
